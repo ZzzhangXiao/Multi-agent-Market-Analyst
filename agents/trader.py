@@ -7,14 +7,14 @@ from llm import get_llm
 from agents.researchers.debate import run_debate
 
 
-def run(analyst_reports: str, tickers: list) -> str:
+def run(analyst_reports: str, tickers: list, rounds: int = 2) -> str:
     print("\nTrader agent starting...")
     llm = get_llm(lite=False)
 
     all_decisions = []
 
     for ticker in tickers:
-        debate = run_debate(analyst_reports, ticker, rounds=2)
+        debate = run_debate(analyst_reports, ticker, rounds=rounds)
 
         prompt = f"""
 You are the head trader at a hedge fund.
@@ -56,13 +56,13 @@ RISK: [biggest risk to this call]
     return full_output
 
 
-def run_debate_log(analyst_reports: str, tickers: list) -> None:
+def run_debate_log(analyst_reports: str, tickers: list, rounds: int = 2) -> None:
     today    = datetime.today().strftime("%Y-%m-%d")
     filepath = f"reports/debate_log_{today}.md"
     with open(filepath, "w") as f:
         f.write(f"# Debate Log — {today}\n\n")
         for ticker in tickers:
-            debate = run_debate(analyst_reports, ticker, rounds=2)
+            debate = run_debate(analyst_reports, ticker, rounds=rounds)
             f.write(f"## {ticker}\n\n")
             for round_data in debate["debate_log"]:
                 f.write(f"### Round {round_data['round']}\n\n")
