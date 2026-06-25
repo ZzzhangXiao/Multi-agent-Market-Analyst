@@ -9,67 +9,182 @@ from llm import get_llm
 
 def build_macro_summary(macro: pd.DataFrame) -> str:
     lines = []
+
     for col in macro.columns:
         series = macro[col].dropna()
         if len(series) < 4:
             continue
 
-        current  = round(series.iloc[-1], 3)
-        prev_1m  = round(series.iloc[-2], 3)
-        prev_3m  = round(series.iloc[-4], 3) if len(series) >= 4 else "n/a"
-        prev_6m  = round(series.iloc[-7], 3) if len(series) >= 7 else "n/a"
-        chg_1m   = round(current - prev_1m, 3)
-        trend    = "rising" if current > prev_1m else "falling"
+        current = round(series.iloc[-1], 3)
+        prev_1m = round(series.iloc[-2], 3)
+        prev_3m = round(series.iloc[-4], 3)
+        prev_6m = round(series.iloc[-7], 3) if len(series) >= 7 else "n/a"
+
+        chg_1m = round(current - prev_1m, 3)
+        chg_3m = round(current - prev_3m, 3)
+        chg_6m = round(current - prev_6m, 3) if isinstance(prev_6m, float) else "n/a"
+
+        trend = "rising" if chg_1m > 0 else "falling" if chg_1m < 0 else "flat"
 
         lines.append(
             f"{col}: current={current} | 1m_change={chg_1m:+.3f} "
-            f"| 3m_ago={prev_3m} | 6m_ago={prev_6m} | trend={trend}"
+            f"| 3m_change={chg_3m:+.3f} | 6m_change={chg_6m} "
+            f"| trend={trend}"
         )
+
     return "\n".join(lines)
 
 
-def classify_regime(macro: pd.DataFrame) -> str:
-    regimes = []
+def _confirmed_trend(series: pd.Series, higher_is_rising: bool = True) -> str:
+    """
+    Uses 2-of-3 recent monthly moves to reduce one-month noise.
+    """
+    series = series.dropna()
 
+    if len(series) < 4:
+        return "insufficient data"
+
+    moves = [
+        series.iloc[-1] - series.iloc[-2],
+        series.iloc[-2] - series.iloc[-3],
+        series.iloc[-3] - series.iloc[-4],
+    ]
+
+    positive = sum(m > 0 for m in moves)
+    negative = sum(m < 0 for m in moves)
+
+    if positive >= 2:
+        return "rising" if higher_is_rising else "falling"
+    if negative >= 2:
+        return "falling" if higher_is_rising else "rising"
+
+    return "mixed"
+
+
+def classify_regime(macro: pd.DataFrame) -> dict:
     fed = macro["fed_funds_rate"].dropna()
     cpi = macro["cpi"].dropna()
     une = macro["unemployment"].dropna()
     tsy = macro["10y_yield"].dropna()
 
-    # Rate regime
-    if len(fed) >= 3:
-        if fed.iloc[-1] < fed.iloc[-3]:
-            regimes.append("EASING: Fed cutting rates — tailwind for equities and bonds")
-        else:
-            regimes.append("TIGHTENING: Fed holding or hiking — headwind for duration assets")
+    signals = []
 
-    # Inflation regime
-    if len(cpi) >= 3:
-        cpi_chg = cpi.iloc[-1] - cpi.iloc[-3]
-        if cpi_chg > 1:
-            regimes.append("INFLATION RISING: headwind for bonds, tailwind for commodities/GLD")
-        elif cpi_chg < -1:
-            regimes.append("INFLATION FALLING: tailwind for bonds, neutral for equities")
-        else:
-            regimes.append("INFLATION STABLE: neutral macro backdrop")
+    # Rate signal
+    fed_trend = _confirmed_trend(fed)
+    if fed_trend == "falling":
+        rate_label = "EASING"
+        signals.append("EASING: Fed rates are falling — tailwind for equities and bonds")
+    elif fed_trend == "rising":
+        rate_label = "TIGHTENING"
+        signals.append("TIGHTENING: Fed rates are rising — headwind for duration assets")
+    else:
+        rate_label = "MIXED"
+        signals.append("RATES MIXED: Fed signal is unclear over recent months")
 
-    # Labor market
-    if len(une) >= 3:
-        if une.iloc[-1] < une.iloc[-3]:
-            regimes.append("LABOR: tightening — supports consumer spending, mild inflation risk")
-        else:
-            regimes.append("LABOR: loosening — recession risk rising, defensive posture warranted")
+    # Inflation signal
+    cpi_trend = _confirmed_trend(cpi)
+    if cpi_trend == "rising":
+        inflation_label = "RISING"
+        signals.append("INFLATION RISING: headwind for bonds, tailwind for commodities/GLD")
+    elif cpi_trend == "falling":
+        inflation_label = "FALLING"
+        signals.append("INFLATION FALLING: tailwind for bonds, easing pressure on equities")
+    else:
+        inflation_label = "STABLE/MIXED"
+        signals.append("INFLATION MIXED: no clean inflation trend")
 
-    # Yield curve
-    if len(tsy) >= 2:
-        if tsy.iloc[-1] > 4.5:
-            regimes.append("YIELDS ELEVATED: pressure on growth stocks and real estate")
-        elif tsy.iloc[-1] < 3.5:
-            regimes.append("YIELDS LOW: supportive for equities and long duration bonds")
-        else:
-            regimes.append(f"YIELDS NEUTRAL: 10y at {round(tsy.iloc[-1], 2)}%")
+    # Labor signal
+    unemployment_trend = _confirmed_trend(une)
 
-    return "\n".join(regimes)
+    if unemployment_trend == "falling":
+        labor_label = "TIGHTENING"
+        growth_label = "IMPROVING"
+        signals.append("LABOR: tightening — unemployment is falling, supporting consumer demand")
+    elif unemployment_trend == "rising":
+        labor_label = "LOOSENING"
+        growth_label = "WEAKENING"
+        signals.append("LABOR: loosening — unemployment is rising, recession risk increasing")
+    else:
+        labor_label = "MIXED"
+        growth_label = "MIXED"
+        signals.append("LABOR MIXED: unemployment signal is not decisive")
+
+    # Yield signal
+    current_10y = tsy.iloc[-1] if len(tsy) else None
+    tsy_trend = _confirmed_trend(tsy)
+
+    if current_10y is not None:
+        if current_10y > 4.5:
+            yield_label = "ELEVATED"
+            signals.append(f"YIELDS ELEVATED: 10y at {round(current_10y, 2)}%, pressure on growth stocks and real estate")
+        elif current_10y < 3.5:
+            yield_label = "LOW"
+            signals.append(f"YIELDS LOW: 10y at {round(current_10y, 2)}%, supportive for duration assets")
+        else:
+            yield_label = "NEUTRAL"
+            signals.append(f"YIELDS NEUTRAL: 10y at {round(current_10y, 2)}%")
+    else:
+        yield_label = "UNKNOWN"
+        signals.append("YIELDS UNKNOWN: insufficient 10y yield data")
+
+    # Regime classification
+    support = {
+        "Goldilocks": 0,
+        "Stagflation": 0,
+        "Reflation": 0,
+        "Deflationary bust": 0,
+    }
+
+    if inflation_label == "RISING" and growth_label == "IMPROVING":
+        support["Reflation"] += 2
+    if inflation_label == "RISING" and growth_label == "WEAKENING":
+        support["Stagflation"] += 2
+    if inflation_label == "FALLING" and growth_label == "IMPROVING":
+        support["Goldilocks"] += 2
+    if inflation_label == "FALLING" and growth_label == "WEAKENING":
+        support["Deflationary bust"] += 2
+
+    if rate_label == "EASING":
+        support["Goldilocks"] += 1
+        support["Deflationary bust"] += 1
+    elif rate_label == "TIGHTENING":
+        support["Stagflation"] += 1
+
+    if tsy_trend == "rising":
+        support["Reflation"] += 1
+        support["Stagflation"] += 1
+    elif tsy_trend == "falling":
+        support["Goldilocks"] += 1
+        support["Deflationary bust"] += 1
+
+    top_regime = max(support, key=support.get)
+    top_score = support[top_regime]
+    total_score = sum(support.values())
+
+    confidence = "low"
+    if total_score > 0:
+        confidence_ratio = top_score / total_score
+        if confidence_ratio >= 0.6:
+            confidence = "high"
+        elif confidence_ratio >= 0.45:
+            confidence = "medium"
+
+    regime_sentence = (
+        f"AUTHORITATIVE REGIME CLASSIFICATION: {top_regime} "
+        f"with {confidence} confidence. "
+        f"Support scores: {support}."
+    )
+
+    return {
+        "signals": "\n".join(signals),
+        "regime": regime_sentence,
+        "rate_label": rate_label,
+        "inflation_label": inflation_label,
+        "labor_label": labor_label,
+        "growth_label": growth_label,
+        "yield_label": yield_label,
+        "confidence": confidence,
+    }
 
 
 def run() -> str:
@@ -81,49 +196,74 @@ def run() -> str:
         parse_dates=True
     )
 
-    macro_summary  = build_macro_summary(macro)
-    regime_summary = classify_regime(macro)
+    macro_summary = build_macro_summary(macro)
+    regime_info = classify_regime(macro)
 
-    llm    = get_llm()
+    deterministic_header = f"""
+## Deterministic Macro Signals
+
+{regime_info["signals"]}
+
+{regime_info["regime"]}
+
+Key labels:
+- Rates: {regime_info["rate_label"]}
+- Inflation: {regime_info["inflation_label"]}
+- Labor: {regime_info["labor_label"]}
+- Growth proxy: {regime_info["growth_label"]}
+- Yields: {regime_info["yield_label"]}
+"""
+
+    llm = get_llm()
     prompt = f"""
 You are a senior macro economist at a global macro hedge fund.
 
-Analyze the following macroeconomic data and produce a rigorous macro outlook.
+The deterministic macro signals below are authoritative.
+You must not contradict them.
+Do not reinterpret tightening as loosening, or loosening as tightening.
+Use the exact labels provided.
 
-Cover:
-1. Rate environment — what is the Fed doing and what does it mean for asset classes
-2. Inflation dynamics — trajectory, implications for real returns and asset allocation
-3. Labor market — what does unemployment trend signal about economic cycle
-4. Yield curve — what does the 10y level signal about growth expectations
-5. Macro regime classification — which of these best describes the current environment:
-   - Goldilocks (low inflation, growth)
-   - Stagflation (high inflation, low growth)
-   - Reflation (rising inflation, rising growth)
-   - Deflationary bust (falling inflation, falling growth)
-6. Asset class implications — given this regime, what should be overweight/underweight
+Your job is only to explain implications for asset classes.
 
-Be specific. Reference exact numbers. No generic statements.
+Required output:
+1. Rate environment
+2. Inflation dynamics
+3. Labor market
+4. Yield environment
+5. Macro regime implications
+6. Asset class implications
+
+Rules:
+- Reference exact numbers from MACRO DATA.
+- Reference the exact labels from DETERMINISTIC SIGNALS.
+- Do not invent data.
+- If the regime confidence is low or medium, explicitly say the regime is qualified rather than certain.
 
 MACRO DATA:
 {macro_summary}
 
-REGIME SIGNALS:
-{regime_summary}
+DETERMINISTIC SIGNALS:
+{deterministic_header}
 """
 
     print("Calling LLM...")
     response = llm.invoke(prompt)
-    analysis = response.content
+    llm_analysis = response.content
 
-    today    = datetime.today().strftime("%Y-%m-%d")
+    analysis = deterministic_header + "\n\n## Macro Interpretation\n\n" + llm_analysis
+
+    today = datetime.today().strftime("%Y-%m-%d")
+    os.makedirs("reports", exist_ok=True)
+
     filepath = f"reports/macro_analysis_{today}.md"
-    with open(filepath, "w") as f:
+    with open(filepath, "w", encoding="utf-8") as f:
         f.write(f"# Macro Analysis — {today}\n\n")
         f.write(analysis)
 
     print("\nMacro Analysis:")
     print(analysis)
-    print(f"\nSaved to reports/macro_analysis_{today}.md")
+    print(f"\nSaved to {filepath}")
+
     return analysis
 
 

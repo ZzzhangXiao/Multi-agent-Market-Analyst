@@ -10,12 +10,12 @@ FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
 # Switch this one line later to swap to Claude
 LLM_PROVIDER = "groq"  # change to "anthropic" later
 
-TICKERS = [
-    "SPY", "QQQ", "TLT", "GLD",
-    "XOM", "NEE",
-    "ULG.SI", "P52.SI",
-    "0P00006G05", "DRAM"
-]
+TICKERS = ["XOM", "NEE", "ULG.SI", "P52.SI"]
+#     "SPY", "QQQ", "TLT", "GLD",
+#     "XOM", "NEE",
+#     "ULG.SI", "P52.SI",
+#     "0P00006G05", "DRAM"
+# ]
 
 # Tickers approved for strategy and backtesting
 # Must have clean continuous price history
