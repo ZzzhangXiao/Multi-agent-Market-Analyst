@@ -165,7 +165,10 @@ Rules:
 - Do not convert sector-context headlines into strong ticker signals.
 - Every per-ticker signal must be one of: POSITIVE, NEGATIVE, MIXED, MANUAL REVIEW.
 - Do not mention JPM, GS, or any other non-universe ticker as a per-ticker signal unless they are in the ticker universe.
-
+- If DIRECT coverage for a ticker contains both clearly positive and clearly
+  negative/cautionary items, the signal must be MIXED, not POSITIVE or NEGATIVE.
+  List which specific headlines drove the call.
+  
 Required output:
 1. Dominant macro themes
 2. Sector-specific developments

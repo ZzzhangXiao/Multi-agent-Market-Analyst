@@ -126,7 +126,9 @@ def classify_regime(macro: pd.DataFrame) -> dict:
     else:
         yield_label = "UNKNOWN"
         signals.append("YIELDS UNKNOWN: insufficient 10y yield data")
+    signals.append(f"YIELD TREND: 10y yield trend is {tsy_trend} (2-of-3 recent moves)")   # ADD THIS
 
+    # Regime classification
     # Regime classification
     support = {
         "Goldilocks": 0,
@@ -157,8 +159,8 @@ def classify_regime(macro: pd.DataFrame) -> dict:
         support["Goldilocks"] += 1
         support["Deflationary bust"] += 1
 
-    top_regime = max(support, key=support.get)
-    top_score = support[top_regime]
+    top_score = max(support.values())
+    tied = [k for k, v in support.items() if v == top_score]
     total_score = sum(support.values())
 
     confidence = "low"
@@ -169,11 +171,21 @@ def classify_regime(macro: pd.DataFrame) -> dict:
         elif confidence_ratio >= 0.45:
             confidence = "medium"
 
-    regime_sentence = (
-        f"AUTHORITATIVE REGIME CLASSIFICATION: {top_regime} "
-        f"with {confidence} confidence. "
-        f"Support scores: {support}."
-    )
+    if len(tied) > 1:
+        top_regime = None
+        confidence = "low"  # a tie is never a confident call, regardless of ratio
+        regime_sentence = (
+            f"AUTHORITATIVE REGIME CLASSIFICATION: TIED between {' and '.join(tied)} "
+            f"(no dominant regime signal — treat as inconclusive). "
+            f"Support scores: {support}."
+        )
+    else:
+        top_regime = tied[0]
+        regime_sentence = (
+            f"AUTHORITATIVE REGIME CLASSIFICATION: {top_regime} "
+            f"with {confidence} confidence. "
+            f"Support scores: {support}."
+        )
 
     return {
         "signals": "\n".join(signals),
@@ -183,7 +195,9 @@ def classify_regime(macro: pd.DataFrame) -> dict:
         "labor_label": labor_label,
         "growth_label": growth_label,
         "yield_label": yield_label,
+        "yield_trend_label": tsy_trend,
         "confidence": confidence,
+        "top_regime": top_regime,  # None when tied — useful if other code reads this dict
     }
 
 
@@ -212,6 +226,7 @@ Key labels:
 - Labor: {regime_info["labor_label"]}
 - Growth proxy: {regime_info["growth_label"]}
 - Yields: {regime_info["yield_label"]}
+- Yield trend: {regime_info["yield_trend_label"]}
 """
 
     llm = get_llm()

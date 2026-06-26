@@ -10,7 +10,7 @@ FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
 # Switch this one line later to swap to Claude
 LLM_PROVIDER = "groq"  # change to "anthropic" later
 
-TICKERS = ["XOM", "NEE", "ULG.SI", "P52.SI"]
+TICKERS = ["XOM", "NEE", "ULG.SI", "P52.SI", "DRAM"]
 #     "SPY", "QQQ", "TLT", "GLD",
 #     "XOM", "NEE",
 #     "ULG.SI", "P52.SI",

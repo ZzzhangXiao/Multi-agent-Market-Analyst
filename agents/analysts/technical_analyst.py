@@ -34,7 +34,12 @@ def compute_bollinger(series: pd.Series, period: int = 20):
     return round(upper.iloc[-1], 2), round(lower.iloc[-1], 2), round(pct_b.iloc[-1], 3)
 
 
-def compute_atr(prices: pd.DataFrame, ticker: str, period: int = 14) -> float:
+def compute_close_range_atr_proxy(prices: pd.DataFrame, ticker: str, period: int = 14) -> float:
+    """
+    NOTE: This is a close-price-only proxy for ATR, not true ATR.
+    True ATR requires intraday high/low; we only have daily close prices,
+    so this approximates volatility from close-to-close ranges instead.
+    """
     high = prices[ticker].rolling(2).max()
     low = prices[ticker].rolling(2).min()
     close = prices[ticker]
@@ -102,7 +107,7 @@ def build_technical_summary(prices: pd.DataFrame) -> str:
         rsi = compute_rsi(series)
         macd, sig, hist = compute_macd(series)
         bb_upper, bb_lower, pct_b = compute_bollinger(series)
-        atr = compute_atr(prices, ticker)
+        atr = compute_close_range_atr_proxy(prices, ticker)   # renamed call
 
         trend = (
             "uptrend" if price > ma50 > ma200
@@ -135,7 +140,7 @@ def build_technical_summary(prices: pd.DataFrame) -> str:
   MACD: {macd} | Signal: {sig} | Hist: {hist} [{macd_signal}]
   SETUP LABEL: {setup_label}
   Bollinger: upper={bb_upper} lower={bb_lower} %B={pct_b}
-  ATR(14): {atr}""")
+  Close-range volatility proxy(14): {atr}""")
 
     return "\n".join(lines)
 
@@ -158,7 +163,9 @@ You are a professional technical analyst at a hedge fund.
 Analyze the following technical indicators for each asset.
 
 Rules:
-- Be specific and reference exact RSI levels, MACD values, Bollinger band positions, and ATR values.
+- Be specific and - Reference the exact Close-Range Volatility Proxy value (an ATR-style measure
+  computed from close prices only, not true intraday ATR — do not call it
+  "true ATR" or compare it to published ATR figures elsewhere).
 - Use the precomputed Price vs MA20/MA50/MA200 labels verbatim.
 - Do not infer price-vs-MA relationships yourself.
 - Use the precomputed SETUP LABEL verbatim.

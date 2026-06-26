@@ -33,6 +33,18 @@ def _save_cache(cache: dict) -> None:
 def _is_cache_fresh(entry: dict) -> bool:
     return time.time() - entry.get("timestamp", 0) < CACHE_TTL_SECONDS
 
+ETF_QUOTE_TYPES = {"ETF", "MUTUALFUND", "INDEX"}
+
+
+def asset_class_label(quote_type):
+    if not quote_type:
+        return "ASSET CLASS UNKNOWN"
+    qt = str(quote_type).upper()
+    if qt in ETF_QUOTE_TYPES:
+        return f"{qt} — SKIP COMPANY-STYLE VALUATION/GROWTH ANALYSIS"
+    if qt == "EQUITY":
+        return "EQUITY"
+    return f"OTHER ({qt})"
 
 def _extract_fundamentals(info: dict) -> dict:
     return {
@@ -66,19 +78,26 @@ def valuation_label(pe, forward_pe, peg, pb):
 
 
 def balance_sheet_label(debt_to_equity, current_ratio):
+    if current_ratio is None and debt_to_equity is None:
+        return "BALANCE SHEET DATA UNAVAILABLE"
+
     if current_ratio is not None and current_ratio < 1:
         liquidity = "WEAK LIQUIDITY"
     elif current_ratio is not None and current_ratio >= 1.5:
         liquidity = "SOLID LIQUIDITY"
-    else:
+    elif current_ratio is not None:
         liquidity = "ADEQUATE LIQUIDITY"
+    else:
+        liquidity = "LIQUIDITY DATA UNAVAILABLE"
 
     if debt_to_equity is not None and debt_to_equity > 100:
         leverage = "HIGH LEVERAGE"
     elif debt_to_equity is not None and debt_to_equity > 50:
         leverage = "MODERATE LEVERAGE"
-    else:
+    elif debt_to_equity is not None:
         leverage = "LOW / MANAGEABLE LEVERAGE"
+    else:
+        leverage = "LEVERAGE DATA UNAVAILABLE"
 
     return f"{liquidity}; {leverage}"
 
@@ -200,7 +219,7 @@ def build_fundamentals_summary(tickers: list) -> str:
             f.get("peg_ratio"),
             f.get("price_to_book"),
         )
-
+        asset_class_view = asset_class_label(f.get("quote_type"))   # ADD THIS
         balance_view = balance_sheet_label(
             f.get("debt_to_equity"),
             f.get("current_ratio"),
@@ -223,6 +242,7 @@ def build_fundamentals_summary(tickers: list) -> str:
             f"ROE={pct(f.get('roe'))} | "
             f"Div Yield={div_yield_pct(f.get('dividend_yield'))} | "
             f"52w Range=[{num(f.get('52w_low'))}, {num(f.get('52w_high'))}] | "
+            f"ASSET CLASS LABEL={asset_class_view} | "
             f"VALUATION LABEL={valuation_view} | "
             f"BALANCE SHEET LABEL={balance_view} | "
             f"GROWTH LABEL={growth_view}"
@@ -244,6 +264,9 @@ def run() -> str:
 You are a fundamentals analyst at a hedge fund.
 
 Rules:
+- Use ASSET CLASS LABEL verbatim.
+- If ASSET CLASS LABEL is ETF or FUND, do not discuss company balance sheet, revenue growth, earnings growth, ROE, or leverage unless actual data is present.
+- If BALANCE SHEET LABEL says DATA UNAVAILABLE, do not describe liquidity or leverage as good or bad.
 - Use the precomputed VALUATION LABEL, BALANCE SHEET LABEL, and GROWTH LABEL verbatim.
 - Do not say a company may struggle with liquidity unless BALANCE SHEET LABEL says WEAK LIQUIDITY.
 - Do not say forward P/E below trailing P/E means overvaluation. It usually means earnings are expected to improve.
