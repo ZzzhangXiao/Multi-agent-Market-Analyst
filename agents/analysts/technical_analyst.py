@@ -5,6 +5,7 @@ sys.path.append(os.path.dirname(os.path.dirname(
 import pandas as pd
 from datetime import datetime
 from llm import get_llm
+from config import TICKERS
 
 
 def compute_rsi(series: pd.Series, period: int = 14) -> float:
@@ -85,13 +86,18 @@ def classify_setup(rsi: float, hist: float, trend: str) -> str:
     return "NO CLEAR SETUP (mixed signals)"
 
 
-def build_technical_summary(prices: pd.DataFrame) -> str:
+def build_technical_summary(prices: pd.DataFrame, tickers: list) -> str:
     lines = []
 
-    for ticker in prices.columns:
+    for ticker in tickers:
+        if ticker not in prices.columns:
+            lines.append(f"\n{ticker}: NO PRICE DATA AVAILABLE (not in prices.csv) — skipped")
+            continue
+
         series = prices[ticker].dropna()
 
         if len(series) < 50:
+            lines.append(f"\n{ticker}: INSUFFICIENT HISTORY (<50 rows) — skipped")
             continue
 
         price = round(series.iloc[-1], 2)
@@ -154,7 +160,7 @@ def run() -> str:
         parse_dates=True
     )
 
-    technical_summary = build_technical_summary(prices)
+    technical_summary = build_technical_summary(prices, TICKERS)
 
     llm = get_llm()
     prompt = f"""

@@ -19,11 +19,9 @@ DEBATE_ROUNDS = 1            # was hardcoded to 2 in trader.py — now overridab
 DEBATE_TICKERS_LIMIT = None  # e.g. 2 to debate only the first 2 tickers while testing
 
 # Focus debate on clean tickers only
-DEBATE_TICKERS = ["SPY", "QQQ", "TLT", "GLD", "XOM", "NEE"]
+DEBATE_TICKERS = TICKERS.copy()
 if DEBATE_TICKERS_LIMIT:
     DEBATE_TICKERS = DEBATE_TICKERS[:DEBATE_TICKERS_LIMIT]
-
-
 def main():
     print("Starting trading agent pipeline...")
     print("=" * 50)

@@ -17,12 +17,14 @@ TICKERS = ["XOM", "NEE", "ULG.SI", "P52.SI", "DRAM"]
 #     "0P00006G05", "DRAM"
 # ]
 
-# Tickers approved for strategy and backtesting
-# Must have clean continuous price history
-STRATEGY_TICKERS = [
-    "SPY", "QQQ", "TLT", "GLD",
-    "XOM", "NEE", "P52.SI"
-]
+# ── SINGLE SOURCE OF TRUTH ──
+# Every analyst (technical, fundamentals, news, sentiment) and main.py's
+# DEBATE_TICKERS reads this list. Change coverage here only — no other
+# file should hardcode a ticker list.
+TICKERS = ["XOM", "NEE", "ULG.SI", "P52.SI", "DRAM"]
+#     "SPY", "QQQ", "TLT", "GLD",
+#     "0P00006G05"
+# ]
 
 FRED_SERIES = {
     "fed_funds_rate": "FEDFUNDS",

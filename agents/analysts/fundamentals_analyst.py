@@ -114,12 +114,16 @@ def growth_label(revenue_growth, earnings_growth):
     return "MIXED GROWTH QUALITY"
 
 
-def fetch_fundamentals_live(ticker: str, max_retries: int = 3) -> dict:
+def fetch_fundamentals_live(ticker: str, max_retries: int = 3) -> tuple:
+    """
+    Returns (data: dict, failure_reason: str | None).
+    failure_reason is None on success.
+    """
     for attempt in range(max_retries):
         try:
             info = yf.Ticker(ticker).info
             if not info:
-                return {}
+                return {}, "NO_INFO_RETURNED"
 
             f = _extract_fundamentals(info)
 
@@ -128,7 +132,9 @@ def fetch_fundamentals_live(ticker: str, max_retries: int = 3) -> dict:
                 for k in ["pe_ratio", "market_cap", "price_to_book", "dividend_yield"]
             )
 
-            return f if has_useful_data else {}
+            if has_useful_data:
+                return f, None
+            return {}, "NO_USEFUL_FIELDS"
 
         except Exception as e:
             if "Too Many Requests" in str(e) and attempt < max_retries - 1:
@@ -137,27 +143,37 @@ def fetch_fundamentals_live(ticker: str, max_retries: int = 3) -> dict:
                 time.sleep(wait)
                 continue
 
+            if "Too Many Requests" in str(e):
+                print(f"  Rate limited on {ticker}, retries exhausted")
+                return {}, "RATE_LIMITED_RETRIES_EXHAUSTED"
+
             print(f"  Fundamentals fetch failed for {ticker}: {e}")
-            return {}
+            return {}, "FETCH_EXCEPTION"
 
-    return {}
+    return {}, "RATE_LIMITED_RETRIES_EXHAUSTED"
 
 
-def get_fundamentals(ticker: str, cache: dict, allow_live: bool = True) -> dict:
+
+def get_fundamentals(ticker: str, cache: dict, allow_live: bool = True) -> tuple:
+    """
+    Returns (data: dict, failure_reason: str | None).
+    failure_reason is None whenever data came from somewhere usable
+    (fresh cache, stale cache, or a successful live fetch).
+    """
     entry = cache.get(ticker)
 
     if entry and _is_cache_fresh(entry):
         print(f"  Using fresh cache for {ticker}")
-        return entry.get("data", {})
+        return entry.get("data", {}), None
 
     if not allow_live:
         if entry:
             print(f"  Using stale cache for {ticker}")
-            return entry.get("data", {})
-        return {}
+            return entry.get("data", {}), None
+        return {}, "CIRCUIT_BREAKER_SKIPPED_NO_CACHE"
 
     print(f"  Fetching fundamentals for {ticker}...")
-    f = fetch_fundamentals_live(ticker)
+    f, reason = fetch_fundamentals_live(ticker)
 
     if f:
         cache[ticker] = {
@@ -165,13 +181,13 @@ def get_fundamentals(ticker: str, cache: dict, allow_live: bool = True) -> dict:
             "date": datetime.today().strftime("%Y-%m-%d"),
             "data": f,
         }
-        return f
+        return f, None
 
     if entry:
         print(f"  Falling back to stale cache for {ticker}")
-        return entry.get("data", {})
+        return entry.get("data", {}), None
 
-    return {}
+    return {}, reason
 
 
 def pct(x):
@@ -190,6 +206,28 @@ def div_yield_pct(x):
     return f"{round(pct_value, 2)}%"
 
 
+FAILURE_REASON_MESSAGES = {
+    "NO_INFO_RETURNED":
+        "no data returned by yfinance for this ticker (likely delisted, "
+        "wrong symbol, or unsupported exchange — NOT a rate-limit issue)",
+    "NO_USEFUL_FIELDS":
+        "yfinance returned a profile but none of the key fields "
+        "(P/E, market cap, P/B, dividend yield) were populated — "
+        "consistent with an ETF/fund/index that lacks company-style "
+        "fundamentals, NOT a fetch failure",
+    "RATE_LIMITED_RETRIES_EXHAUSTED":
+        "yfinance rate-limited this request and all retries were "
+        "exhausted — transient API throttling, not a data-availability issue",
+    "FETCH_EXCEPTION":
+        "an unexpected error occurred while fetching this ticker's data "
+        "(see logs) — not a rate-limit or missing-data issue",
+    "CIRCUIT_BREAKER_SKIPPED_NO_CACHE":
+        "skipped live fetch because 2+ consecutive prior tickers were "
+        "rate-limited (circuit breaker open), and no cached data exists "
+        "for this ticker yet — try again later or on its own",
+}
+
+
 def build_fundamentals_summary(tickers: list) -> str:
     lines = []
     cache = _load_cache()
@@ -201,57 +239,18 @@ def build_fundamentals_summary(tickers: list) -> str:
         if not allow_live:
             print(f"  Circuit breaker open — cache only for {ticker}")
 
-        f = get_fundamentals(ticker, cache, allow_live=allow_live)
+        f, failure_reason = get_fundamentals(ticker, cache, allow_live=allow_live)
 
         if not f:
             consecutive_live_failures += 1
-            lines.append(
-                f"{ticker}: fundamentals unavailable "
-                f"(ETF/fund/limited coverage or rate-limited)"
+            reason_text = FAILURE_REASON_MESSAGES.get(
+                failure_reason,
+                "fundamentals unavailable (unknown reason)"
             )
+            lines.append(f"{ticker}: FUNDAMENTALS UNAVAILABLE — {reason_text}")
             continue
 
         consecutive_live_failures = 0
-
-        valuation_view = valuation_label(
-            f.get("pe_ratio"),
-            f.get("forward_pe"),
-            f.get("peg_ratio"),
-            f.get("price_to_book"),
-        )
-        asset_class_view = asset_class_label(f.get("quote_type"))   # ADD THIS
-        balance_view = balance_sheet_label(
-            f.get("debt_to_equity"),
-            f.get("current_ratio"),
-        )
-
-        growth_view = growth_label(
-            f.get("revenue_growth"),
-            f.get("earnings_growth"),
-        )
-
-        lines.append(
-            f"{ticker}: "
-            f"Name={f.get('long_name', 'n/a')} | Type={f.get('quote_type', 'n/a')} | "
-            f"P/E={num(f.get('pe_ratio'))} | Fwd P/E={num(f.get('forward_pe'))} | "
-            f"PEG={num(f.get('peg_ratio'))} | P/B={num(f.get('price_to_book'))} | "
-            f"D/E={num(f.get('debt_to_equity'))} | Current Ratio={num(f.get('current_ratio'))} | "
-            f"Profit Margin={pct(f.get('profit_margin'))} | "
-            f"Revenue Growth={pct(f.get('revenue_growth'))} | "
-            f"Earnings Growth={pct(f.get('earnings_growth'))} | "
-            f"ROE={pct(f.get('roe'))} | "
-            f"Div Yield={div_yield_pct(f.get('dividend_yield'))} | "
-            f"52w Range=[{num(f.get('52w_low'))}, {num(f.get('52w_high'))}] | "
-            f"ASSET CLASS LABEL={asset_class_view} | "
-            f"VALUATION LABEL={valuation_view} | "
-            f"BALANCE SHEET LABEL={balance_view} | "
-            f"GROWTH LABEL={growth_view}"
-        )
-
-        time.sleep(0.5)
-
-    _save_cache(cache)
-    return "\n".join(lines)
 
 
 def run() -> str:
@@ -273,6 +272,24 @@ Rules:
 - Do not invent missing figures.
 - For ETFs, funds, bond ETFs, gold ETFs, or thematic ETFs, do not analyze them like normal companies.
 - Every conclusion must be tied to a number from the data.
+
+For any ticker marked "FUNDAMENTALS UNAVAILABLE", the reason given is authoritative —
+do not substitute your own explanation for why data is missing:
+- If the reason mentions "no useful fields" or reads consistent with an ETF/fund,
+  state plainly that this looks like an ETF/fund/index lacking company-style
+  fundamentals. Do NOT describe this as a fetch failure or rate-limit issue.
+- If the reason mentions "rate-limited", state plainly that this is a transient
+  API throttling issue, not a reflection of the asset's actual data availability.
+  Do NOT imply the company has no fundamentals data in general.
+- If the reason mentions "no data returned", state plainly that yfinance had
+  no profile at all for this symbol (possible delisting/wrong ticker/unsupported
+  exchange). Do NOT attribute this to rate limits or to it being an ETF.
+- If the reason mentions "circuit breaker", state plainly that the fetch was
+  skipped this run due to prior consecutive failures, and no cached fallback
+  existed — this says nothing about whether the ticker itself has fundamentals.
+- If the reason mentions "unexpected error" (FETCH_EXCEPTION), say only that
+  fetching failed for a technical reason and do not speculate further.
+- Never merge these five reasons into a single generic "data unavailable" statement.
 
 For each asset with company-level data, cover:
 1. Valuation
