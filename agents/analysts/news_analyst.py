@@ -143,20 +143,21 @@ def build_news_summary(tickers: list) -> str:
     return "\n".join(lines)
 
 
-def run() -> str:
+def run(ticker: str = None) -> str:
     print("News analyst running...")
 
-    news_summary = build_news_summary(TICKERS)
+    scope = [ticker] if ticker else TICKERS
+    news_summary = build_news_summary(scope)
 
     llm = get_llm()
     prompt = f"""
 You are a market news analyst at a hedge fund.
 
 Ticker universe:
-{TICKERS}
+{scope}
 
 Rules:
-- Only discuss tickers in this universe: {TICKERS}
+- Only discuss tickers in this universe: {scope}
 - Do not introduce new ticker-level recommendations for companies outside this universe.
 - General market headlines may be mentioned only as macro or sector context.
 - If a news item is not directly about a ticker, label it as sector context, not ticker-specific signal.
@@ -187,7 +188,7 @@ NEWS DATA:
     today = datetime.today().strftime("%Y-%m-%d")
     os.makedirs("reports", exist_ok=True)
 
-    filepath = f"reports/news_analysis_{today}.md"
+    filepath = f"reports/news_analysis_{ticker or 'ALL'}_{today}.md"
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(f"# News Analysis — {today}\n\n")
         f.write("## Raw News Data\n\n")

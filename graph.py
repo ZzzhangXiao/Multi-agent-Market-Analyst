@@ -148,7 +148,8 @@ def _mark_done(state: TradingState, name: str, report_key: str, report: str) -> 
 
 def technical_node(state: TradingState) -> TradingState:
     from agents.analysts.technical_analyst import run as run_technical
-    return _mark_done(state, "technical", "technical_report", run_technical())
+    ticker = state["ticker"] if state["ticker"] != "PORTFOLIO" else None
+    return _mark_done(state, "technical", "technical_report", run_technical(ticker))
 
 
 def macro_node(state: TradingState) -> TradingState:
@@ -158,19 +159,20 @@ def macro_node(state: TradingState) -> TradingState:
 
 def news_node(state: TradingState) -> TradingState:
     from agents.analysts.news_analyst import run as run_news
-    return _mark_done(state, "news", "news_report", run_news())
+    ticker = state["ticker"] if state["ticker"] != "PORTFOLIO" else None
+    return _mark_done(state, "news", "news_report", run_news(ticker))
 
 
 def fundamentals_node(state: TradingState) -> TradingState:
     from agents.analysts.fundamentals_analyst import run as run_fundamentals
-    return _mark_done(state, "fundamentals", "fundamentals_report", run_fundamentals())
+    ticker = state["ticker"] if state["ticker"] != "PORTFOLIO" else None
+    return _mark_done(state, "fundamentals", "fundamentals_report", run_fundamentals(ticker))
 
 
 def sentiment_node(state: TradingState) -> TradingState:
     from agents.analysts.sentiment_analyst import run as run_sentiment
-    return _mark_done(state, "sentiment", "sentiment_report", run_sentiment())
-
-
+    ticker = state["ticker"] if state["ticker"] != "PORTFOLIO" else None
+    return _mark_done(state, "sentiment", "sentiment_report", run_sentiment(ticker))
 # ─────────────────────────────────────────
 # BUILD GRAPH
 # ─────────────────────────────────────────

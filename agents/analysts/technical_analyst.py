@@ -151,7 +151,7 @@ def build_technical_summary(prices: pd.DataFrame, tickers: list) -> str:
     return "\n".join(lines)
 
 
-def run() -> str:
+def run(ticker: str = None) -> str:
     print("Technical analyst running...")
 
     prices = pd.read_csv(
@@ -160,8 +160,8 @@ def run() -> str:
         parse_dates=True
     )
 
-    technical_summary = build_technical_summary(prices, TICKERS)
-
+    scope = [ticker] if ticker else TICKERS
+    technical_summary = build_technical_summary(prices, scope)
     llm = get_llm()
     prompt = f"""
 You are a professional technical analyst at a hedge fund.
@@ -198,7 +198,7 @@ TECHNICAL DATA:
     today = datetime.today().strftime("%Y-%m-%d")
     os.makedirs("reports", exist_ok=True)
 
-    filepath = f"reports/technical_analysis_{today}.md"
+    filepath = f"reports/technical_analysis_{ticker or 'ALL'}_{today}.md"
 
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(f"# Technical Analysis — {today}\n\n")

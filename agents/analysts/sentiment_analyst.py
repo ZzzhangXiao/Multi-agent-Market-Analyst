@@ -184,11 +184,11 @@ def build_sentiment_summary(tickers: list) -> str:
     return "\n".join(lines)
 
 
-def run() -> str:
+def run(ticker: str = None) -> str:
     print("Sentiment analyst running...")
 
-    sentiment_summary = build_sentiment_summary(TICKERS)
-
+    scope = [ticker] if ticker else TICKERS
+    sentiment_summary = build_sentiment_summary(scope)
     llm = get_llm()
     prompt = f"""
 You are a market sentiment analyst at a hedge fund, tracking retail-trader
@@ -222,7 +222,7 @@ SENTIMENT DATA:
     today = datetime.today().strftime("%Y-%m-%d")
     os.makedirs("reports", exist_ok=True)
 
-    filepath = f"reports/sentiment_analysis_{today}.md"
+    filepath = f"reports/sentiment_analysis_{ticker or 'ALL'}_{today}.md"
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(f"# Sentiment Analysis — {today}\n\n")
         f.write(sentiment_summary)

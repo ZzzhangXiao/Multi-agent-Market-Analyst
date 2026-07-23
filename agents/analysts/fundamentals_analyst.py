@@ -253,10 +253,11 @@ def build_fundamentals_summary(tickers: list) -> str:
         consecutive_live_failures = 0
 
 
-def run() -> str:
+def run(ticker: str = None) -> str:
     print("Fundamentals analyst running...")
 
-    fundamentals_summary = build_fundamentals_summary(TICKERS)
+    scope = [ticker] if ticker else TICKERS
+    fundamentals_summary = build_fundamentals_summary(scope)
 
     llm = get_llm()
     prompt = f"""
@@ -301,7 +302,6 @@ For each asset with company-level data, cover:
 FUNDAMENTALS DATA:
 {fundamentals_summary}
 """
-
     print("Calling LLM...")
     response = llm.invoke(prompt)
     analysis = response.content
@@ -309,7 +309,7 @@ FUNDAMENTALS DATA:
     today = datetime.today().strftime("%Y-%m-%d")
     os.makedirs("reports", exist_ok=True)
 
-    filepath = f"reports/fundamentals_analysis_{today}.md"
+    filepath = f"reports/fundamentals_analysis_{ticker or 'ALL'}_{today}.md"
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(f"# Fundamentals Analysis — {today}\n\n")
         f.write("## Deterministic Fundamentals Data\n\n")
