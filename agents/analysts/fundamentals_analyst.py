@@ -251,6 +251,31 @@ def build_fundamentals_summary(tickers: list) -> str:
             continue
 
         consecutive_live_failures = 0
+        
+        asset_label = asset_class_label(f.get("quote_type"))
+        val_label = valuation_label(
+            f.get("pe_ratio"), f.get("forward_pe"), f.get("peg_ratio"), f.get("price_to_book")
+        )
+        bs_label = balance_sheet_label(f.get("debt_to_equity"), f.get("current_ratio"))
+        gr_label = growth_label(f.get("revenue_growth"), f.get("earnings_growth"))
+
+        lines.append(
+            f"{ticker} ({f.get('long_name') or ticker}):\n"
+            f"  ASSET CLASS LABEL: {asset_label}\n"
+            f"  VALUATION LABEL: {val_label}\n"
+            f"  BALANCE SHEET LABEL: {bs_label}\n"
+            f"  GROWTH LABEL: {gr_label}\n"
+            f"  P/E: {num(f.get('pe_ratio'))}, Forward P/E: {num(f.get('forward_pe'))}, "
+            f"PEG: {num(f.get('peg_ratio'))}, P/B: {num(f.get('price_to_book'))}\n"
+            f"  Debt/Equity: {num(f.get('debt_to_equity'))}, Current Ratio: {num(f.get('current_ratio'))}\n"
+            f"  Revenue Growth: {pct(f.get('revenue_growth'))}, Earnings Growth: {pct(f.get('earnings_growth'))}\n"
+            f"  Profit Margin: {pct(f.get('profit_margin'))}, ROE: {pct(f.get('roe'))}\n"
+            f"  Dividend Yield: {div_yield_pct(f.get('dividend_yield'))}\n"
+            f"  Market Cap: {num(f.get('market_cap'))}, "
+            f"52w Range: {num(f.get('52w_low'))}–{num(f.get('52w_high'))}\n"
+        )
+
+    return "\n".join(lines)
 
 
 def run(ticker: str = None) -> str:
