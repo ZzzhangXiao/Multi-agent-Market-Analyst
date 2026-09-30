@@ -9,7 +9,7 @@ class FakeLLM:
     def __init__(self, lite): self.lite = lite
     def invoke(self, prompt):
         CALLS.append(("8b" if self.lite else "70b", prompt))
-        return types.SimpleNamespace(content=f"stub-{'8b' if self.lite else '70b'} → ok")
+        return types.SimpleNamespace(content=f"stub-{'8b' if self.lite else '70b'} -> ok")
     def with_structured_output(self, schema, include_raw=False):
         # Trader now uses structured output; return a valid decision per ticker.
         outer = self

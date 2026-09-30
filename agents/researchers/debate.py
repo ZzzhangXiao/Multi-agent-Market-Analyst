@@ -18,9 +18,9 @@ def run_debate(
     """
     print(f"\nStarting debate for {ticker} ({rounds} rounds)...")
 
-    # BUGFIX (cost): rebuttals were using get_llm() = llama-3.3-70b, while
-    # openings used the 8b model. Debate rounds are meant to run on the
-    # cheap model; 70b is reserved for the trader's final decision.
+    # BUGFIX (cost): rebuttals were using the full model while openings used
+    # the lite one. Debate rounds run on the lite model (config.GROQ_MODEL_LITE);
+    # the full model is reserved for analysts and the trader's final decision.
     llm = get_llm(lite=True)
     debate_log = []
 

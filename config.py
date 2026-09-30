@@ -13,6 +13,23 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 # Switch this one line later to swap to Claude
 LLM_PROVIDER = "groq"  # change to "anthropic" later
 
+# ── Groq models ──
+# Groq decommissioned llama-3.3-70b-versatile and llama-3.1-8b-instant on
+# 2026-08-16 (404 model_not_found). These are Groq's recommended replacements.
+# Model IDs live ONLY here; override without editing code via .env, e.g.
+#   GROQ_MODEL=openai/gpt-oss-120b
+# Check https://console.groq.com/docs/deprecations when a 404 appears.
+GROQ_MODEL      = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")   # analysts + trader
+GROQ_MODEL_LITE = os.getenv("GROQ_MODEL_LITE", "openai/gpt-oss-20b")  # debate + LLM supervisor
+# gpt-oss models are reasoning models; hidden reasoning tokens count toward
+# Groq token limits. "low" keeps cost close to the old Llama setup. Accepted
+# values: "low" | "medium" | "high". Set GROQ_REASONING_EFFORT=none in .env
+# if you switch to a non-reasoning model that rejects the parameter.
+GROQ_REASONING_EFFORT = os.getenv("GROQ_REASONING_EFFORT", "low")
+
+# Used only when LLM_PROVIDER = "anthropic".
+ANTHROPIC_MODEL = "claude-sonnet-4-6"
+
 # ── SINGLE SOURCE OF TRUTH ──
 # Every analyst (technical, fundamentals, news, sentiment) and main.py's
 # DEBATE_TICKERS reads this list. Change coverage here only — no other

@@ -6,7 +6,7 @@ from datetime import datetime
 from llm import get_llm
 
 def run(market_brief: str):
-    print("📡 Signal agent starting...")
+    print("Signal agent starting...")
 
     prices   = pd.read_csv("data/prices.csv",  index_col=0, parse_dates=True)
     features = pd.read_csv("data/features.csv", index_col=0, parse_dates=True)
@@ -38,25 +38,25 @@ LATEST FEATURES:
 {features.tail(3).to_string()}
 """
 
-    print("💬 Calling LLM...")
+    print("Calling LLM...")
     response = llm.invoke(prompt)
     signals  = response.content
 
     today    = datetime.today().strftime("%Y-%m-%d")
     filepath = f"reports/signals_{today}.md"
-    with open(filepath, "w") as f:
+    with open(filepath, "w", encoding="utf-8") as f:
         f.write(f"# Trading Signals — {today}\n\n")
         f.write(signals)
 
-    print("\n📡 Signals:")
+    print("\nSignals:")
     print(signals)
-    print(f"\n✅ Saved to {filepath}")
+    print(f"\nSaved to {filepath}")
     return signals
 
 if __name__ == "__main__":
     # For standalone testing, load today's brief
     today    = datetime.today().strftime("%Y-%m-%d")
     filepath = f"reports/market_brief_{today}.md"
-    with open(filepath, "r") as f:
+    with open(filepath, "r", encoding="utf-8") as f:
         brief = f.read()
     run(brief)

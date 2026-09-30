@@ -23,7 +23,7 @@ def _load_cache() -> dict:
     if not os.path.exists(CACHE_PATH):
         return {}
     try:
-        with open(CACHE_PATH, "r") as f:
+        with open(CACHE_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError):
         return {}
@@ -31,7 +31,7 @@ def _load_cache() -> dict:
 
 def _save_cache(cache: dict) -> None:
     os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
-    with open(CACHE_PATH, "w") as f:
+    with open(CACHE_PATH, "w", encoding="utf-8") as f:
         json.dump(cache, f, indent=2)
 
 

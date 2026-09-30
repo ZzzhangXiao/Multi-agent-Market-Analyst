@@ -44,7 +44,7 @@ def summarize_prices(prices, features):
     return "\n".join(lines)
 
 def run():
-    print("🔍 Research agent starting...")
+    print("Research agent starting...")
     prices, macro, features = load_latest_data()
 
     macro_summary  = summarize_macro(macro)
@@ -71,19 +71,19 @@ MACRO DATA:
 {macro_summary}
 """
 
-    print("💬 Calling LLM...")
+    print("Calling LLM...")
     response = llm.invoke(prompt)
     brief = response.content
 
     today    = datetime.today().strftime("%Y-%m-%d")
     filepath = f"reports/market_brief_{today}.md"
-    with open(filepath, "w") as f:
+    with open(filepath, "w", encoding="utf-8") as f:
         f.write(f"# Market Brief — {today}\n\n")
         f.write(brief)
 
-    print("\n📝 Market Brief:")
+    print("\nMarket Brief:")
     print(brief)
-    print(f"\n✅ Saved to {filepath}")
+    print(f"\nSaved to {filepath}")
     return brief
 
 if __name__ == "__main__":

@@ -27,7 +27,8 @@ class FakeGroq(ChatGroq):
         return ChatResult(generations=[ChatGeneration(message=msg)])
 
 llm_mod = types.ModuleType("llm")
-llm_mod.get_llm = lambda lite=False: FakeGroq(api_key="x", model="llama-3.3-70b-versatile", temperature=0.2)
+from config import GROQ_MODEL
+llm_mod.get_llm = lambda lite=False: FakeGroq(api_key="x", model=GROQ_MODEL, temperature=0.2)
 sys.modules["llm"] = llm_mod
 
 from agents import trader
@@ -64,7 +65,7 @@ assert n["evidence_grounded_frac"] == 0.5
 print("[2] BUY with score -0.3 rejected, retried to REDUCE; invented number caught: grounded =", n["evidence_grounded_frac"])
 assert d["status"] == "llm_error" and d["score"] is None and d["attempts"] == 2
 print("[3] failure still logged:", d["status"], "|", d["error"][:40])
-assert os.path.exists(os.path.join("logs", "snapshots")) and x["prompt_sha256"] and x["model"] == "llama-3.3-70b-versatile"
+assert os.path.exists(os.path.join("logs", "snapshots")) and x["prompt_sha256"] and x["model"] == GROQ_MODEL
 print("[4] snapshots + model/temperature/git metadata recorded:", x["model"], x["temperature"], x["git_commit"])
 
 # stale-data flag: prices ending 30 days ago
