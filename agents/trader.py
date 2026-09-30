@@ -21,10 +21,11 @@ def _reports_for(analyst_reports, ticker: str) -> str:
 
 
 def _load_prices_fallback():
-    """Used only when trader.run() is called without a prices DataFrame."""
+    """Used only when trader.run() is called without a prices DataFrame.
+    Reads the UNFILLED closes (see decisions.log.price_context)."""
     try:
         import pandas as pd
-        return pd.read_csv("data/prices.csv", index_col=0, parse_dates=True)
+        return pd.read_csv("data/prices_raw.csv", index_col=0, parse_dates=True)
     except Exception:
         return None
 

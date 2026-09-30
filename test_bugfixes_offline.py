@@ -30,6 +30,7 @@ idx = pd.bdate_range("2024-10-01", periods=400)
 rng = np.random.default_rng(0)
 raw = pd.DataFrame({t: 100*np.exp(np.cumsum(rng.normal(0,0.01,400))) for t in ["XOM","NEE","ULG.SI","P52.SI","DRAM"]}, index=idx)
 raw.loc[raw.index[:280], "DRAM"] = np.nan
+raw.loc[raw.index[-1], "XOM"] = np.nan   # today's row before the US open: no close yet
 raw.to_csv("data/prices_raw.csv")
 midx = pd.date_range("2024-01-01", periods=24, freq="MS")
 yoy = np.linspace(3.5, 2.0, 24)
@@ -73,7 +74,12 @@ na.build_news_summary = lambda scope: "news data"
 sa.build_sentiment_summary = lambda scope: "sentiment data"
 fa.build_fundamentals_summary = lambda scope: "fund data"
 import main as M
+# Pin the knobs this test depends on, whatever main.py is currently set to.
+# TEST_MODE keeps it offline: it reads the synthetic CSVs instead of Yahoo/FRED.
+M.TEST_MODE = True
 M.RUN_TRADER = True
+M.DEBATE_ROUNDS = 1
+M.DEBATE_TICKERS = list(M.TICKERS)
 CALLS.clear()
 out = M.main()
 macro_calls = [c for c in CALLS if "senior macro economist" in c[1]]
@@ -85,5 +91,9 @@ assert "[XOM]" not in nee_bull and "[NEE]" in nee_bull
 md = open(sorted(p for p in os.listdir("reports") if p.startswith("trader_decisions"))[-1].join(["reports/", ""]), encoding="utf-8").read()
 assert md.count("=" * 40) == 4 and len(out) == 5 and all(r["status"] == "ok" for r in out)
 print(f"[5] macro LLM calls: {len(macro_calls)} (was 5); debate calls all 8b: {len(debate_calls)}; NEE debate has no XOM reports; dividers: {md.count('='*40)}; decisions logged: {len(out)}")
+xom = [r for r in out if r["ticker"] == "XOM"][0]
+assert xom["data_as_of"] == str(idx[-2].date()), f"as_of took the ffilled row: {xom['data_as_of']}"
+assert xom["price_at_decision"] == float(raw["XOM"].iloc[-2])
+print("[6] XOM with no close on the last row: as_of =", xom["data_as_of"], "(last real close, not the ffilled row)")
 print("reports written:", sorted(os.listdir("reports"))[-3:])
 print("ALL TESTS PASSED")

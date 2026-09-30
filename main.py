@@ -14,10 +14,10 @@ USE_LLM_SUPERVISOR = False   # flip to True once you trust the LLM routing decis
 # (2 + 2*(rounds-1)) debate calls + 1 trader call.
 # Use these knobs to iterate cheaply on the analyst graph before
 # spending tokens on the full debate.
-RUN_TRADER = False           # set True to run the trader stage (and log decisions)
-DEBATE_ROUNDS = 1            # 0 = trader decides straight from analyst reports (no debate,
+RUN_TRADER = True            # set True to run the trader stage (and log decisions)
+DEBATE_ROUNDS = 0            # 0 = trader decides straight from analyst reports (no debate,
                              #     1 trader call per ticker — cheapest way to log decisions)
-DEBATE_TICKERS_LIMIT = None  # e.g. 2 to debate only the first 2 tickers while testing
+DEBATE_TICKERS_LIMIT = 2     # e.g. 2 to debate only the first 2 tickers while testing
 # (PER_TICKER_ANALYSTS removed: it was never read — the graph is always per-ticker now.)
 
 DEBATE_TICKERS = TICKERS.copy()
@@ -45,7 +45,8 @@ def main():
                                   index_col=0, parse_dates=True)
         prices     = process_prices(raw_prices)
         features   = calculate_features(prices)
-        data       = {"prices": prices, "macro": macro, "features": features}
+        data       = {"prices": prices, "prices_raw": raw_prices,
+                      "macro": macro, "features": features}
     else:
         data = run_data_agent()
 
@@ -100,8 +101,12 @@ def main():
     if RUN_TRADER:
         # prices passed through so each logged decision records the exact
         # close and date it saw (the anchor for forward-return evaluation).
+        # BUGFIX: pass the UNFILLED prices. The ffilled frame copies the last
+        # close into rows a market has not closed yet, so a run before the US
+        # open logged data_as_of = today with yesterday's price, and stale_data
+        # could never trigger for a ticker that stopped updating.
         decisions = run_trader(reports_by_ticker, DEBATE_TICKERS,
-                               rounds=DEBATE_ROUNDS, prices=data["prices"])
+                               rounds=DEBATE_ROUNDS, prices=data["prices_raw"])
     else:
         print(f"RUN_TRADER=False — skipping debate + trader stage "
               f"(would have run {len(DEBATE_TICKERS)} tickers).")

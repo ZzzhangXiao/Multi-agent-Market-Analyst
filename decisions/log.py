@@ -81,6 +81,10 @@ def price_context(prices, ticker: str, decided_at: datetime) -> dict:
     Last real close the decision could have seen, and its date. Step 2
     measures forward returns FROM this point, so it must be recorded now,
     not reconstructed later from a CSV that may have been revised.
+
+    `prices` must be UNFILLED (data/prices_raw.csv). dropna() below is what
+    finds the last real close; on an ffilled frame it finds nothing to drop,
+    so a copied close would be labelled with a date the market never closed.
     """
     if prices is None or ticker not in getattr(prices, "columns", []):
         return {"data_as_of": None, "price_at_decision": None, "stale_data": None}

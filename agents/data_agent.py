@@ -128,7 +128,11 @@ def run() -> dict:
 
     print("\n Data agent complete.")
     return {
-        "prices":   prices,
+        "prices":     prices,
+        # Unfilled closes. Decision logging must use these: ffill() carries the
+        # last close into rows where a market has not closed yet (e.g. today's
+        # row before the US open), which would mislabel data_as_of.
+        "prices_raw": raw_prices,
         "macro":    macro,
         "features": features
     }
