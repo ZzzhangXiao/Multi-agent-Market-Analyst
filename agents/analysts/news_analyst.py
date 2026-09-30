@@ -2,6 +2,7 @@ import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__)))))
 
+import re
 import requests
 from datetime import datetime, timedelta
 from llm import get_llm
@@ -11,28 +12,41 @@ FINNHUB_NEWS_URL = "https://finnhub.io/api/v1/news"
 FINNHUB_COMPANY_NEWS_URL = "https://finnhub.io/api/v1/company-news"
 
 
+COMPANY_ALIASES = {
+    "XOM": ["exxon", "exxonmobil", "exxon mobil"],
+    "NEE": ["nextera", "next era"],
+    "SPY": ["s&p 500", "sp 500"],
+    "QQQ": ["nasdaq 100", "nasdaq-100"],
+    "TLT": ["20-year treasury", "20+ year treasury"],
+    "GLD": ["gold etf", "spdr gold"],
+    "DRAM": ["memory etf", "memory chip", "memory chips", "micron", "sk hynix"],
+    "P52.SI": ["pan-united", "pan united"],
+    "ULG.SI": ["ulti group"],   # bare "ulti" removed: it matched "multi", "result", "ultimately"
+    "0P00006G05": [],
+}
+
+
 def _is_direct_ticker_news(ticker: str, headline: str, summary: str) -> bool:
-    text = f"{headline} {summary}".lower()
-    ticker_lower = ticker.lower()
+    """
+    BUGFIX: matching used plain substrings on lower-cased text, so
+    "nee" matched "need"/"needed", "ulti" matched "multi"/"results", and
+    "dram" matched "drama" — tagging unrelated articles as DIRECT coverage.
+    Now:
+      - the ticker symbol must appear as a standalone UPPERCASE token
+        (case-sensitive; "NEE", not "nee" inside "need"). For exchange-
+        suffixed symbols the base symbol also counts ("P52" for "P52.SI").
+      - aliases match case-insensitively on word boundaries.
+    """
+    text = f"{headline} {summary}"
 
-    company_aliases = {
-        "XOM": ["exxon", "exxonmobil", "exxon mobil"],
-        "NEE": ["nextera", "next era"],
-        "SPY": ["s&p 500", "sp 500", "s&p"],
-        "QQQ": ["nasdaq", "nasdaq 100"],
-        "TLT": ["treasury", "20-year treasury", "long bond"],
-        "GLD": ["gold", "gold etf"],
-        "DRAM": ["dram", "memory chip", "memory chips", "micron", "sk hynix"],
-        "P52.SI": ["pan-united", "pan united"],
-        "ULG.SI": ["ulti", "ulti group"],
-        "0P00006G05": [],
-    }
+    symbols = {ticker, ticker.split(".")[0]}
+    for sym in symbols:
+        # Not part of a longer token; still matches "$NEE", "NEE:", "(NEE)"
+        if re.search(rf"(?<![\w.]){re.escape(sym)}(?!\w)", text):
+            return True
 
-    if ticker_lower in text:
-        return True
-
-    for alias in company_aliases.get(ticker, []):
-        if alias.lower() in text:
+    for alias in COMPANY_ALIASES.get(ticker, []):
+        if re.search(rf"\b{re.escape(alias)}\b", text, flags=re.IGNORECASE):
             return True
 
     return False

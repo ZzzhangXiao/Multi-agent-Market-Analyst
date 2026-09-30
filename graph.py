@@ -215,14 +215,23 @@ def build_graph(use_llm_supervisor: bool = False):
     return graph.compile()
 
 
-def run_analyst_graph(ticker: str, prices, macro, features, use_llm_supervisor: bool = False) -> TradingState:
+def run_analyst_graph(ticker: str, prices, macro, features,
+                      use_llm_supervisor: bool = False,
+                      macro_report: Optional[str] = None) -> TradingState:
     """
     Entry point for main.py. Runs the full analyst stage for one ticker
     and returns the final state, including every report produced and the
     routing_log (handy to print for a demo — it's the visible evidence
     the graph made decisions rather than following a fixed script).
+
+    macro_report: BUGFIX for cost. Macro is portfolio-wide, but the graph
+    re-ran it inside every per-ticker invocation (5 identical 70b calls per
+    pipeline run, each overwriting the same report file). If the caller
+    passes a precomputed macro_report, it is seeded into state and "macro"
+    is pre-marked complete, so the supervisor skips it.
     """
     app = build_graph(use_llm_supervisor=use_llm_supervisor)
+    seeded = ["macro"] if macro_report is not None else []
 
     initial_state: TradingState = {
         "prices": prices,
@@ -230,12 +239,12 @@ def run_analyst_graph(ticker: str, prices, macro, features, use_llm_supervisor: 
         "features": features,
         "ticker": ticker,
         "technical_report": None,
-        "macro_report": None,
+        "macro_report": macro_report,
         "news_report": None,
         "fundamentals_report": None,
         "sentiment_report": None,
-        "completed_analysts": [],
-        "routing_log": [],
+        "completed_analysts": list(seeded),
+        "routing_log": ["seeded: macro_report precomputed (portfolio-wide)"] if seeded else [],
         "next_step": "",
         "research_report": None,
         "portfolio_strategy": None,

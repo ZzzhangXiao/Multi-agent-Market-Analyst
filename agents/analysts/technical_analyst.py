@@ -23,7 +23,23 @@ def compute_macd(series: pd.Series):
     macd = ema12 - ema26
     signal = macd.ewm(span=9).mean()
     hist = macd - signal
-    return round(macd.iloc[-1], 4), round(signal.iloc[-1], 4), round(hist.iloc[-1], 4)
+    # Also return the previous bar's histogram so we can tell a genuine
+    # crossover (sign change) apart from MACD merely sitting above/below signal.
+    return (round(macd.iloc[-1], 4), round(signal.iloc[-1], 4),
+            round(hist.iloc[-1], 4), hist.iloc[-2])
+
+
+def macd_label(hist: float, prev_hist: float) -> str:
+    """
+    BUGFIX: previously any hist > 0 was labelled "bullish crossover".
+    A crossover is the bar where MACD crosses its signal line (histogram
+    changes sign); otherwise it is only a position relative to signal.
+    """
+    if prev_hist <= 0 < hist:
+        return "bullish crossover (this bar)"
+    if prev_hist >= 0 > hist:
+        return "bearish crossover (this bar)"
+    return "MACD above signal (bullish momentum)" if hist > 0 else "MACD below signal (bearish momentum)"
 
 
 def compute_bollinger(series: pd.Series, period: int = 20):
@@ -35,15 +51,19 @@ def compute_bollinger(series: pd.Series, period: int = 20):
     return round(upper.iloc[-1], 2), round(lower.iloc[-1], 2), round(pct_b.iloc[-1], 3)
 
 
-def compute_close_range_atr_proxy(prices: pd.DataFrame, ticker: str, period: int = 14) -> float:
+def compute_close_range_atr_proxy(series: pd.Series, period: int = 14) -> float:
     """
     NOTE: This is a close-price-only proxy for ATR, not true ATR.
     True ATR requires intraday high/low; we only have daily close prices,
     so this approximates volatility from close-to-close ranges instead.
+
+    BUGFIX: now takes the already-dropna'd series (same one every other
+    indicator uses) instead of the raw prices column, so any NaN inside the
+    last `period` rows can no longer turn the result into NaN.
     """
-    high = prices[ticker].rolling(2).max()
-    low = prices[ticker].rolling(2).min()
-    close = prices[ticker]
+    high = series.rolling(2).max()
+    low = series.rolling(2).min()
+    close = series
 
     tr = pd.concat([
         high - low,
@@ -108,18 +128,30 @@ def build_technical_summary(prices: pd.DataFrame, tickers: list) -> str:
 
         ma20 = round(series.rolling(20).mean().iloc[-1], 2)
         ma50 = round(series.rolling(50).mean().iloc[-1], 2)
-        ma200 = round(series.rolling(min(200, len(series))).mean().iloc[-1], 2)
+        # BUGFIX: previously used rolling(min(200, len)) and still labelled the
+        # result "MA200" — a 120-day average presented as a 200-day one.
+        # Now MA200 is only reported when 200 rows exist.
+        has_ma200 = len(series) >= 200
+        ma200 = round(series.rolling(200).mean().iloc[-1], 2) if has_ma200 else None
 
         rsi = compute_rsi(series)
-        macd, sig, hist = compute_macd(series)
+        macd, sig, hist, prev_hist = compute_macd(series)
         bb_upper, bb_lower, pct_b = compute_bollinger(series)
-        atr = compute_close_range_atr_proxy(prices, ticker)   # renamed call
+        atr = compute_close_range_atr_proxy(series)
 
-        trend = (
-            "uptrend" if price > ma50 > ma200
-            else "downtrend" if price < ma50 < ma200
-            else "mixed"
-        )
+        if has_ma200:
+            trend = (
+                "uptrend" if price > ma50 > ma200
+                else "downtrend" if price < ma50 < ma200
+                else "mixed"
+            )
+        else:
+            # Without a real MA200, fall back to price vs MA50 only and say so.
+            trend = (
+                "uptrend (MA50 only, <200 rows)" if price > ma50
+                else "downtrend (MA50 only, <200 rows)" if price < ma50
+                else "mixed"
+            )
 
         rsi_signal = (
             "overbought" if rsi > 70
@@ -127,13 +159,16 @@ def build_technical_summary(prices: pd.DataFrame, tickers: list) -> str:
             else "neutral"
         )
 
-        macd_signal = "bullish crossover" if hist > 0 else "bearish crossover"
+        macd_signal = macd_label(hist, prev_hist)
 
         vs_ma20 = ma_relation(price, ma20)
         vs_ma50 = ma_relation(price, ma50)
-        vs_ma200 = ma_relation(price, ma200)
+        vs_ma200_str = (f"{ma_relation(price, ma200)} ({ma200})" if has_ma200
+                        else f"UNAVAILABLE (only {len(series)} rows of history)")
 
-        setup_label = classify_setup(rsi, hist, trend)
+        # classify_setup matches on exact "uptrend"/"downtrend"; strip the
+        # MA50-only qualifier so the fallback trend still participates.
+        setup_label = classify_setup(rsi, hist, trend.split(" ")[0])
 
         lines.append(f"""
 {ticker}:
@@ -141,7 +176,7 @@ def build_technical_summary(prices: pd.DataFrame, tickers: list) -> str:
   Trend: {trend}
   Price vs MA20: {vs_ma20} ({ma20})
   Price vs MA50: {vs_ma50} ({ma50})
-  Price vs MA200: {vs_ma200} ({ma200})
+  Price vs MA200: {vs_ma200_str}
   RSI(14): {rsi} [{rsi_signal}]
   MACD: {macd} | Signal: {sig} | Hist: {hist} [{macd_signal}]
   SETUP LABEL: {setup_label}
@@ -169,12 +204,16 @@ You are a professional technical analyst at a hedge fund.
 Analyze the following technical indicators for each asset.
 
 Rules:
-- Be specific and - Reference the exact Close-Range Volatility Proxy value (an ATR-style measure
+- Be specific: every statement must cite a number from the technical data.
+- Reference the exact Close-Range Volatility Proxy value (an ATR-style measure
   computed from close prices only, not true intraday ATR — do not call it
   "true ATR" or compare it to published ATR figures elsewhere).
 - Use the precomputed Price vs MA20/MA50/MA200 labels verbatim.
 - Do not infer price-vs-MA relationships yourself.
 - Use the precomputed SETUP LABEL verbatim.
+- Use the MACD label in brackets verbatim. Only call it a "crossover" if the
+  label says "crossover (this bar)".
+- If Price vs MA200 says UNAVAILABLE, do not discuss the 200-day average.
 - A WEAK BOUNCE CANDIDATE is not a STRONG setup.
 - Do not call an asset a strong setup unless the SETUP LABEL says STRONG or BULLISH/BEARISH REVERSAL SETUP.
 - Do not invent support/resistance levels unless they are directly implied by the moving averages or Bollinger bands.

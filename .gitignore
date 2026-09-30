@@ -6,3 +6,5 @@ __pycache__/
 venv/
 .venv/
 data/
+# offline test scratch dirs
+_testrun/

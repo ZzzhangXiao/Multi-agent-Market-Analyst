@@ -9,9 +9,14 @@ import yfinance as yf
 from datetime import datetime
 from llm import get_llm
 from config import TICKERS
+from yf_session import SESSION, jitter
 
 CACHE_PATH = "data/fundamentals_cache.json"
 CACHE_TTL_SECONDS = 24 * 60 * 60
+# Bump when _extract_fundamentals() gains/changes fields. Entries written
+# under an older schema are treated as stale (still usable as a fallback,
+# but a live refresh is attempted first).
+CACHE_SCHEMA_VERSION = 2
 
 
 def _load_cache() -> dict:
@@ -31,6 +36,8 @@ def _save_cache(cache: dict) -> None:
 
 
 def _is_cache_fresh(entry: dict) -> bool:
+    if entry.get("schema") != CACHE_SCHEMA_VERSION:
+        return False
     return time.time() - entry.get("timestamp", 0) < CACHE_TTL_SECONDS
 
 ETF_QUOTE_TYPES = {"ETF", "MUTUALFUND", "INDEX"}
@@ -46,6 +53,27 @@ def asset_class_label(quote_type):
         return "EQUITY"
     return f"OTHER ({qt})"
 
+def _compute_dividend_yield_pct(info: dict):
+    """
+    BUGFIX: yfinance's `dividendYield` has changed units across versions
+    (fraction in older builds, already-a-percent in newer ones). The old
+    `x * 100 if x <= 1 else x` heuristic mis-scales any stock yielding
+    under 1% on newer builds (0.5 -> "50%"). Compute it ourselves from
+    unambiguous fields instead:
+      1. dividendRate / price * 100          (both in the same currency)
+      2. trailingAnnualDividendYield * 100   (always a fraction)
+    Returns a percent (e.g. 2.82) or None.
+    """
+    rate = info.get("dividendRate")
+    price = info.get("currentPrice") or info.get("regularMarketPrice")
+    if isinstance(rate, (int, float)) and isinstance(price, (int, float)) and price > 0:
+        return rate / price * 100
+    trailing = info.get("trailingAnnualDividendYield")
+    if isinstance(trailing, (int, float)):
+        return trailing * 100
+    return None
+
+
 def _extract_fundamentals(info: dict) -> dict:
     return {
         "pe_ratio": info.get("trailingPE"),
@@ -58,7 +86,8 @@ def _extract_fundamentals(info: dict) -> dict:
         "revenue_growth": info.get("revenueGrowth"),
         "earnings_growth": info.get("earningsGrowth"),
         "roe": info.get("returnOnEquity"),
-        "dividend_yield": info.get("dividendYield"),
+        "dividend_yield": info.get("dividendYield"),          # raw, unit-ambiguous; kept for audit only
+        "dividend_yield_pct": _compute_dividend_yield_pct(info),  # use this one
         "52w_low": info.get("fiftyTwoWeekLow"),
         "52w_high": info.get("fiftyTwoWeekHigh"),
         "market_cap": info.get("marketCap"),
@@ -121,7 +150,8 @@ def fetch_fundamentals_live(ticker: str, max_retries: int = 3) -> tuple:
     """
     for attempt in range(max_retries):
         try:
-            info = yf.Ticker(ticker).info
+            # Shared curl_cffi session — see yf_session.py
+            info = yf.Ticker(ticker, session=SESSION).info
             if not info:
                 return {}, "NO_INFO_RETURNED"
 
@@ -172,6 +202,7 @@ def get_fundamentals(ticker: str, cache: dict, allow_live: bool = True) -> tuple
             return entry.get("data", {}), None
         return {}, "CIRCUIT_BREAKER_SKIPPED_NO_CACHE"
 
+    jitter()  # spacing before every LIVE Yahoo call (cache hits skip this)
     print(f"  Fetching fundamentals for {ticker}...")
     f, reason = fetch_fundamentals_live(ticker)
 
@@ -179,6 +210,7 @@ def get_fundamentals(ticker: str, cache: dict, allow_live: bool = True) -> tuple
         cache[ticker] = {
             "timestamp": time.time(),
             "date": datetime.today().strftime("%Y-%m-%d"),
+            "schema": CACHE_SCHEMA_VERSION,
             "data": f,
         }
         return f, None
@@ -198,11 +230,10 @@ def num(x):
     return round(x, 2) if isinstance(x, (int, float)) else "n/a"
 
 
-def div_yield_pct(x):
-    if not isinstance(x, (int, float)):
+def div_yield_pct(pct_value):
+    """Input is already a percent (see _compute_dividend_yield_pct)."""
+    if not isinstance(pct_value, (int, float)):
         return "n/a"
-
-    pct_value = x * 100 if x <= 1 else x
     return f"{round(pct_value, 2)}%"
 
 
@@ -227,14 +258,20 @@ FAILURE_REASON_MESSAGES = {
         "for this ticker yet — try again later or on its own",
 }
 
+# Only these reasons count toward the circuit breaker. Previously EVERY
+# failure incremented the counter, so two ETFs in a row (NO_USEFUL_FIELDS)
+# would open the breaker and the report would then falsely claim the
+# skip was caused by rate-limiting.
+RATE_LIMIT_REASONS = {"RATE_LIMITED_RETRIES_EXHAUSTED"}
+
 
 def build_fundamentals_summary(tickers: list) -> str:
     lines = []
     cache = _load_cache()
-    consecutive_live_failures = 0
+    consecutive_rate_limits = 0
 
     for ticker in tickers:
-        allow_live = consecutive_live_failures < 2
+        allow_live = consecutive_rate_limits < 2
 
         if not allow_live:
             print(f"  Circuit breaker open — cache only for {ticker}")
@@ -242,7 +279,8 @@ def build_fundamentals_summary(tickers: list) -> str:
         f, failure_reason = get_fundamentals(ticker, cache, allow_live=allow_live)
 
         if not f:
-            consecutive_live_failures += 1
+            if failure_reason in RATE_LIMIT_REASONS:
+                consecutive_rate_limits += 1
             reason_text = FAILURE_REASON_MESSAGES.get(
                 failure_reason,
                 "fundamentals unavailable (unknown reason)"
@@ -250,8 +288,8 @@ def build_fundamentals_summary(tickers: list) -> str:
             lines.append(f"{ticker}: FUNDAMENTALS UNAVAILABLE — {reason_text}")
             continue
 
-        consecutive_live_failures = 0
-        
+        consecutive_rate_limits = 0
+
         asset_label = asset_class_label(f.get("quote_type"))
         val_label = valuation_label(
             f.get("pe_ratio"), f.get("forward_pe"), f.get("peg_ratio"), f.get("price_to_book")
@@ -270,10 +308,15 @@ def build_fundamentals_summary(tickers: list) -> str:
             f"  Debt/Equity: {num(f.get('debt_to_equity'))}, Current Ratio: {num(f.get('current_ratio'))}\n"
             f"  Revenue Growth: {pct(f.get('revenue_growth'))}, Earnings Growth: {pct(f.get('earnings_growth'))}\n"
             f"  Profit Margin: {pct(f.get('profit_margin'))}, ROE: {pct(f.get('roe'))}\n"
-            f"  Dividend Yield: {div_yield_pct(f.get('dividend_yield'))}\n"
+            f"  Dividend Yield: {div_yield_pct(f.get('dividend_yield_pct'))}\n"
             f"  Market Cap: {num(f.get('market_cap'))}, "
             f"52w Range: {num(f.get('52w_low'))}–{num(f.get('52w_high'))}\n"
         )
+
+    # BUGFIX: _save_cache() was defined but never called, so the cache was
+    # never written to disk. Every run re-hit Yahoo for every ticker, which
+    # is the main driver of the rate-limit failures.
+    _save_cache(cache)
 
     return "\n".join(lines)
 

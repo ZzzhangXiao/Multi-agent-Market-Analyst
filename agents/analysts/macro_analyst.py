@@ -7,8 +7,23 @@ from datetime import datetime
 from llm import get_llm
 
 
+def _cpi_yoy(macro: pd.DataFrame) -> pd.Series:
+    """
+    YoY CPI inflation rate in percent, from the CPIAUCSL index level.
+    CPIAUCSL is monthly, so a 12-period pct_change is a 12-month change.
+    """
+    cpi_level = macro["cpi"].dropna()
+    return (cpi_level.pct_change(12) * 100).dropna()
+
+
 def build_macro_summary(macro: pd.DataFrame) -> str:
     lines = []
+
+    # Add the derived inflation RATE alongside the raw index so the LLM sees
+    # the number the INFLATION label is actually based on. The raw "cpi"
+    # column is an index level (~300s) and is labelled as such below.
+    macro = macro.copy()
+    macro["cpi_yoy_pct"] = _cpi_yoy(macro)
 
     for col in macro.columns:
         series = macro[col].dropna()
@@ -26,8 +41,12 @@ def build_macro_summary(macro: pd.DataFrame) -> str:
 
         trend = "rising" if chg_1m > 0 else "falling" if chg_1m < 0 else "flat"
 
+        # Mark the CPI level explicitly so its always-rising trend is not
+        # read as "inflation rising".
+        name = "cpi (index LEVEL, not inflation rate)" if col == "cpi" else col
+
         lines.append(
-            f"{col}: current={current} | 1m_change={chg_1m:+.3f} "
+            f"{name}: current={current} | 1m_change={chg_1m:+.3f} "
             f"| 3m_change={chg_3m:+.3f} | 6m_change={chg_6m} "
             f"| trend={trend}"
         )
@@ -63,7 +82,12 @@ def _confirmed_trend(series: pd.Series, higher_is_rising: bool = True) -> str:
 
 def classify_regime(macro: pd.DataFrame) -> dict:
     fed = macro["fed_funds_rate"].dropna()
-    cpi = macro["cpi"].dropna()
+    # BUGFIX: trend was computed on the CPI index LEVEL. The price level
+    # rises in almost every month even while inflation is falling, so the
+    # label was structurally stuck on "INFLATION RISING" (see every macro
+    # report to date), biasing the regime vote toward Reflation/Stagflation.
+    # The inflation signal must come from the YoY inflation RATE.
+    cpi = _cpi_yoy(macro)
     une = macro["unemployment"].dropna()
     tsy = macro["10y_yield"].dropna()
 
@@ -83,15 +107,16 @@ def classify_regime(macro: pd.DataFrame) -> dict:
 
     # Inflation signal
     cpi_trend = _confirmed_trend(cpi)
+    cpi_now = f"{round(cpi.iloc[-1], 2)}% YoY" if len(cpi) else "n/a"
     if cpi_trend == "rising":
         inflation_label = "RISING"
-        signals.append("INFLATION RISING: headwind for bonds, tailwind for commodities/GLD")
+        signals.append(f"INFLATION RISING (CPI {cpi_now}): headwind for bonds, tailwind for commodities/GLD")
     elif cpi_trend == "falling":
         inflation_label = "FALLING"
-        signals.append("INFLATION FALLING: tailwind for bonds, easing pressure on equities")
+        signals.append(f"INFLATION FALLING (CPI {cpi_now}): tailwind for bonds, easing pressure on equities")
     else:
         inflation_label = "STABLE/MIXED"
-        signals.append("INFLATION MIXED: no clean inflation trend")
+        signals.append(f"INFLATION MIXED (CPI {cpi_now}): no clean inflation trend")
 
     # Labor signal
     unemployment_trend = _confirmed_trend(une)
@@ -126,9 +151,8 @@ def classify_regime(macro: pd.DataFrame) -> dict:
     else:
         yield_label = "UNKNOWN"
         signals.append("YIELDS UNKNOWN: insufficient 10y yield data")
-    signals.append(f"YIELD TREND: 10y yield trend is {tsy_trend} (2-of-3 recent moves)")   # ADD THIS
+    signals.append(f"YIELD TREND: 10y yield trend is {tsy_trend} (2-of-3 recent moves)")
 
-    # Regime classification
     # Regime classification
     support = {
         "Goldilocks": 0,
@@ -252,6 +276,8 @@ Rules:
 - Reference exact numbers from MACRO DATA.
 - Reference the exact labels from DETERMINISTIC SIGNALS.
 - Do not invent data.
+- Inflation = cpi_yoy_pct. The "cpi" row is a price-index LEVEL; never describe
+  its rise as inflation rising.
 - If the regime confidence is low or medium, explicitly say the regime is qualified rather than certain.
 
 MACRO DATA:
